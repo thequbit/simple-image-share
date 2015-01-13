@@ -141,9 +141,9 @@ class User(Base):
         with transaction.manager:
             user = None
             _user = session.query(
-                Users,
+                User,
             ).filter(
-                Users.email == email,
+                User.email == email,
             ).first()
             if _user != None:
                 pass_hash = hashlib.sha256('{0}{1}'.format(
@@ -157,7 +157,7 @@ class User(Base):
     @classmethod
     def get_user_by_id(cls, session, id):
         with transaction.manager:
-            user = sessin.query(
+            user = session.query(
                 User.id,
                 User.user_type_id,
                 User.first,
@@ -207,11 +207,12 @@ class LoginToken(Base):
     @classmethod
     def do_login(cls, session, email, password):
         with transaction.manager:
-            user = Users.authenticate_user(
+            user = User.authenticate_user(
                 session = session,
                 email = email,
                 password = password,
             )
+            token = None
             if user != None:
                 login_token = cls(
                     user_id = user.id,
@@ -222,22 +223,23 @@ class LoginToken(Base):
                 )
                 session.add(login_token)
                 transaction.commit() 
-        return user, login_token.token
+                token = login_token.token
+        return user, token
 
     @classmethod
     def check_authentication(cls, session, token):
         with transaction.manager:
             user = None
             login_token = session.query(
-                LoginTokens,
+                LoginToken,
             ).filter(
-                LoginTokens.token == token,
-                LoginTokens.token_expire_datetime > datetime.datetime.now(),
+                LoginToken.token == token,
+                LoginToken.token_expire_datetime > datetime.datetime.now(),
             ).first()
             if login_token != None:
-                user = Users.get_by_id(
+                user = User.get_user_by_id(
                     session = session,
-                    user_id = login_token.user_id,
+                    id = login_token.user_id,
                 )
         return user
 
@@ -245,9 +247,9 @@ class LoginToken(Base):
     def logout(cls, session, token):
         with transaction.manager:
             login_token = session.query(
-                LoginTokens,
+                LoginToken,
             ).filter(
-                LoginTokens.token == token,
+                LoginToken.token == token,
             ).first()
             session.delete(login_token)
             transaction.commit()
@@ -265,7 +267,7 @@ class Worker(Base):
         with transaction.manager:
             worker = Worker(
                 user_id = user_id,
-                registration_datetime = datetime.datetime.now(),
+                registeration_datetime = datetime.datetime.now(),
             )
             session.add(worker)
             transaction.commit()
@@ -296,27 +298,45 @@ class Picture(Base):
 
     __tablename__ = 'pictures'
     id = Column(Integer, primary_key=True)
-    filename = Column(Text)
+    file_name = Column(Text)
     unique = Column(Text)
     upload_datetime = Column(DateTime)
     
     @classmethod
-    def add_picture(cls, session):
+    def add_picture(cls, session, file_name, folder_name, folder_path):
         with transaction.manager:
             picture = Picture(
-                filename = filename,
-                unique = str(uuid.uuid4()),
+                file_name = file_name,
+                unique = hashlib.sha256(str(uuid.uuid4())).hexdigest(),
                 upload_datetime = datetime.datetime.now(),
             )
             session.add(picture)
             transaction.commit()
+            
+            folder = Folder.get_folder_by_name(
+                session = session,
+                name = folder_name,
+            )
+            if folder == None:
+                folder = Folder.add_folder(
+                    session = session,
+                    name = folder_name,
+                    path = folder_path,
+                )
+            PictureFolderAssignment.assign(
+                session = session,
+                picture_id = picture.id,
+                folder_id = folder.id,
+            )
+ 
         return picture
 
     @classmethod
     def get_picture_by_id(cls, session, id):
         with transaction.manager:
             picture = session.query(
-                Picture.filename,
+                Picture.id,
+                Picture.file_name,
                 Picture.unique,
                 Picture.upload_datetime,
             ).filter(
@@ -325,26 +345,108 @@ class Picture(Base):
         return picture
 
     @classmethod
-    def get_picture_by_filename(cls, session, filename):
+    def get_picture_by_unique(cls, session, unique):
         with transaction.manager:
             picture = session.query(
-                Picture.filename,
+                Picture.id,
+                Picture.file_name,
                 Picture.unique,
                 Picture.upload_datetime,
             ).filter(
-                Picture.filename == filename,
+                Picture.unique == unique,
             ).first()
         return picture
 
     @classmethod
-    def get_all_pictures(cls, session):
-        picture = session.query(
-                Picture.filename,
+    def get_picture_by_file_name(cls, session, file_name):
+        with transaction.manager:
+            picture = session.query(
+                Picture.id,
+                Picture.file_name,
                 Picture.unique,
                 Picture.upload_datetime,
             ).filter(
-                Picture.filename == filename,
+                Picture.file_name == file_name,
             ).first()
+        return picture
+
+    @classmethod
+    def get_all_pictures_by_folder_id(cls, session, folder_id):
+        with transaction.manager:
+            pictures = session.query(
+                Picture.id,
+                Picture.file_name,
+                Picture.unique,
+                Picture.upload_datetime,
+            ).join(
+                PictureFolderAssignment,PictureFolderAssignment.picture_id == \
+                    Picture.id,
+            ).filter(
+                PictureFolderAssignment.folder_id == folder_id,
+            ).all()
+        return pictures
+
+    @classmethod
+    def get_all_pictures(cls, session, start, count):
+        with transaction.manager:
+            pictures = session.query(
+                Picture.file_name,
+                Picture.unique,
+                Picture.upload_datetime,
+            ).slice(start, start+count)
+        return pictures
+
+class Folder(Base):
+
+    __tablename__ = 'folders'
+    id = Column(Integer, primary_key=True)
+    name = Column(Text)
+    path = Column(Text)
+
+    @classmethod
+    def add_folder(cls, session, name, path):
+        with transaction.manager:
+            folder = Folder(
+                name = name,
+                path = path,
+            )
+            session.add(folder)
+            transaction.commit()
+        return folder
+
+    @classmethod
+    def get_folder_by_name(cls, session, name):
+        with transaction.manager:
+            folder = session.query(
+                Folder,
+            ).filter(
+                Folder.name == name,
+            ).first()
+        return folder
+
+    @classmethod
+    def get_all_folders(cls, session):
+        with transaction.manager:
+            folders = session.query(
+                Folder,
+            ).all()
+        return folders
+
+class PictureFolderAssignment(Base):
+
+    __tablename__ = 'picturefolderassignments'
+    id = Column(Integer, primary_key=True)
+    picture_id = Column(Integer, ForeignKey('pictures.id'))
+    folder_id = Column(Integer, ForeignKey('folders.id'))
+
+    @classmethod
+    def assign(cls, session, picture_id, folder_id):
+        with transaction.manager:
+            assignment = PictureFolderAssignment(
+                picture_id = picture_id,
+                folder_id = folder_id,
+            )
+        return assignment
 
 class Album(Base):
 
@@ -404,9 +506,15 @@ class Album(Base):
             albums = session.query(
                 Album.id,
                 Album.name,
-                Album.creator_id,
                 Album.creation_datetime,
-                Album.display_picture_id,
+                User.id,
+                User.first,
+                User.last,
+                Picture.unique,
+            ).join(
+                User, User.id == Album.creator_id,
+            ).join(
+                Picture, Picture.id == Album.display_picture_id,
             ).join(
                  AlbumUserAssignment, AlbumUserAssignment.album_id == \
                      Album.id,

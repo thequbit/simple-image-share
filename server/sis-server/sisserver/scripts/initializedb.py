@@ -66,8 +66,9 @@ def main(argv=sys.argv):
             description = 'user',
         )
 
-    if UserType.get_user_type_by_name(DBSession, 'worker') == None:
-        UserType.add_user_type(
+    worker_user_type = UserType.get_user_type_by_name(DBSession, 'worker')
+    if worker_user_type == None:
+        worker_user_type = UserType.add_user_type(
             session = DBSession,
             name = 'worker',
             description = 'picture gathering worker',
@@ -80,6 +81,16 @@ def main(argv=sys.argv):
             first = 'system',
             last = 'user',
             email = 'system',
+            password = hashlib.sha256('password').hexdigest(),
+        )
+
+    if User.get_user_by_email(DBSession, 'worker') == None:
+        User.add_user(
+            session = DBSession,
+            user_type_id = worker_user_type.id,
+            first = 'worker',
+            last = 'user',
+            email = 'worker',
             password = hashlib.sha256('password').hexdigest(),
         )
 
